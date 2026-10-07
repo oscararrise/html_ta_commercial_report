@@ -243,24 +243,48 @@ def get_hibob_raw_data() -> pd.DataFrame:
 
 
 def _excel_safe(value):
-    """Serialize nested source values so Excel preserves them."""
+    """Convert values to Excel-compatible representations."""
     if isinstance(value, (dict, list, tuple)):
         return json.dumps(
             value,
             ensure_ascii=False,
             default=str,
         )
+
+    if isinstance(value, pd.Timestamp):
+        if value.tzinfo is not None:
+            return value.tz_localize(None)
+        return value
+
+    if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            return value.replace(tzinfo=None)
+        return value
+
     return value
 
 
 def _prepare_excel_dataframe(
     dataframe: pd.DataFrame,
 ) -> pd.DataFrame:
+    """Return a copy safe to write with openpyxl.
+
+    Excel does not support timezone-aware datetimes. PostgreSQL and the
+    Jobvite API can both return them, so timezone information is removed only
+    in the exported Excel copy. The source DataFrames used by the HTML report
+    are left untouched.
+    """
     prepared = dataframe.copy()
 
     for column in prepared.columns:
-        if prepared[column].dtype == "object":
-            prepared[column] = prepared[column].map(_excel_safe)
+        series = prepared[column]
+
+        if isinstance(series.dtype, pd.DatetimeTZDtype):
+            prepared[column] = series.dt.tz_localize(None)
+            continue
+
+        if series.dtype == "object":
+            prepared[column] = series.map(_excel_safe)
 
     return prepared
 
